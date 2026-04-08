@@ -129,15 +129,12 @@ class TelegramSender:
         """
         Test if bot is configured properly.
 
-        Note: Full connection test requires async context.
-        Here we just verify the bot token is set.
-
         Returns:
             True if bot is configured
         """
         try:
-            if not self.bot.token:
-                logger.error("Telegram bot token is not configured")
+            if not self.token or not self.primary_chat_id:
+                logger.error("Telegram credentials not configured")
                 return False
             logger.info("✓ Telegram bot configured")
             return True
