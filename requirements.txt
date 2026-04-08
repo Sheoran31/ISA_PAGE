@@ -1,0 +1,35 @@
+# ===== Core API Clients =====
+yfinance>=0.2.32
+python-telegram-bot>=21.0.0
+
+# ===== Scheduling =====
+APScheduler>=3.10.4
+
+# ===== Configuration =====
+python-dotenv>=1.0.0
+
+# ===== HTTP & Networking =====
+requests>=2.31.0
+urllib3>=2.0.0
+
+# ===== Date/Time (IST timezone handling) =====
+pytz>=2024.1
+
+# ===== File Watching (hot-reload conditions.json) =====
+watchdog>=4.0.0
+
+# ===== Data Validation =====
+pydantic>=2.5.0
+
+# ===== Utilities =====
+tenacity>=8.2.3
+
+# ===== Testing =====
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-mock>=3.12.0
+freezegun>=1.4.0
+
+# ===== Development =====
+black>=24.0.0
+ruff>=0.3.0
