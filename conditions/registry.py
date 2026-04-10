@@ -12,6 +12,8 @@ from conditions.price_between import PriceBetweenCondition
 from conditions.percent_change import PercentChangeCondition
 from conditions.volume_spike import VolumeSpikeCondition
 from conditions.ema_consolidation import EMAConsolidationBreakout
+from conditions.ema_breakdown import EMAConsolidationBreakdown
+from conditions.ema_smart_breakout import EMASmartBreakout
 from utils.logger import logger
 from utils.exceptions import InvalidConditionError
 
@@ -134,6 +136,8 @@ def initialize_registry() -> None:
 
     # Advanced conditions
     ConditionRegistry.register('ema_consolidation', EMAConsolidationBreakout)
+    ConditionRegistry.register('ema_breakdown', EMAConsolidationBreakdown)
+    ConditionRegistry.register('ema_smart_breakout', EMASmartBreakout)
 
     logger.info(f"Condition registry initialized with {len(ConditionRegistry.list_all())} types")
 

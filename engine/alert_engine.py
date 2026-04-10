@@ -8,13 +8,17 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 from config.conditions import load_conditions
+from config.settings import MAX_ALERTS_PER_CYCLE, MAX_ALERTS_PER_SYMBOL_PER_DAY
 from conditions.registry import ConditionRegistry
 from engine.cooldown_manager import CooldownManager
+from engine.rate_limiter import RateLimiter
 from fetcher.price_fetcher import get_price_fetcher
 from alerts.message_formatter import MessageFormatter
 from alerts.telegram_sender import get_telegram_sender
 from storage.alert_repository import AlertRepository
 from storage.condition_repository import ConditionRepository
+from storage.engine_state_repository import EngineStateRepository
+from storage.metrics_repository import MetricsRepository
 from utils.logger import logger
 from utils.exceptions import StockAlertError
 
@@ -40,8 +44,21 @@ class AlertEngine:
         self.price_fetcher = get_price_fetcher()
         self.telegram_sender = get_telegram_sender()
         self.cooldown_manager = CooldownManager()
+        self.rate_limiter = RateLimiter(
+            max_per_cycle=MAX_ALERTS_PER_CYCLE,
+            max_per_symbol_per_day=MAX_ALERTS_PER_SYMBOL_PER_DAY
+        )
         self.last_check_time = None
         self.alerts_fired_today = 0
+
+        # Restore state from database (crash recovery)
+        try:
+            snapshot = EngineStateRepository.load_snapshot()
+            self.last_check_time = snapshot.get('last_check_time')
+            self.alerts_fired_today = snapshot.get('alerts_fired_today', 0)
+            logger.info(f"Engine state restored: {self.alerts_fired_today} alerts fired today")
+        except Exception as e:
+            logger.warning(f"Failed to restore engine state: {e}")
 
         logger.info("AlertEngine initialized")
 
@@ -64,6 +81,9 @@ class AlertEngine:
 
             start_time = datetime.utcnow()
             self.last_check_time = start_time.isoformat()
+
+            # Reset rate limiter cycle counter
+            self.rate_limiter.reset_cycle()
 
             # Step 1: Load conditions
             logger.info("📋 Loading conditions...")
@@ -112,6 +132,11 @@ class AlertEngine:
                         logger.debug(f"Condition {condition.alert_id} in cooldown")
                         continue
 
+                    # Check if should skip (rate limit)
+                    if not self.rate_limiter.can_fire(condition.symbol):
+                        logger.debug(f"Rate limit hit for {condition.symbol}")
+                        continue
+
                     # Evaluate condition
                     logger.debug(f"Evaluating: {condition.describe()}")
                     triggered = condition.evaluate(price_data)
@@ -149,6 +174,9 @@ class AlertEngine:
                             cooldown_minutes = getattr(condition, 'cooldown_minutes', 30)
                             self.cooldown_manager.set_cooldown(condition.alert_id, cooldown_minutes)
 
+                            # Record in rate limiter
+                            self.rate_limiter.record_fire(condition.symbol)
+
                             alerts_fired += 1
                             self.alerts_fired_today += 1
 
@@ -162,7 +190,7 @@ class AlertEngine:
             logger.info(f"CHECK COMPLETE: {alerts_fired} alerts fired in {elapsed:.2f}s")
             logger.info("=" * 70)
 
-            return {
+            result = {
                 'success': True,
                 'alerts_fired': alerts_fired,
                 'symbols_checked': len(symbols),
@@ -170,15 +198,32 @@ class AlertEngine:
                 'elapsed_seconds': elapsed
             }
 
+            # Record metrics and save engine state
+            try:
+                MetricsRepository.record_cycle(result)
+                EngineStateRepository.save_snapshot({
+                    'last_check_time': self.last_check_time,
+                    'alerts_fired_today': self.alerts_fired_today
+                })
+            except Exception as e:
+                logger.warning(f"Failed to save metrics/state: {e}")
+
+            return result
+
         except Exception as e:
             logger.error(f"Alert check failed: {e}")
-            return {
+            result = {
                 'success': False,
                 'alerts_fired': 0,
                 'symbols_checked': 0,
                 'error': str(e),
                 'timestamp': datetime.utcnow().isoformat()
             }
+            try:
+                MetricsRepository.record_cycle(result)
+            except Exception as me:
+                logger.warning(f"Failed to record error metrics: {me}")
+            return result
 
     def _load_all_conditions(self) -> List:
         """

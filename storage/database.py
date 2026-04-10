@@ -43,6 +43,8 @@ class Database:
                 timeout=30
             )
             self.connection.row_factory = sqlite3.Row
+            # Enable WAL mode for concurrent multi-thread writes
+            self.connection.execute("PRAGMA journal_mode=WAL")
             logger.info(f"Database connected: {self.db_path}")
 
             self._create_tables()
@@ -159,6 +161,31 @@ class Database:
                     last_checked TEXT NOT NULL
                 )
             ''')
+
+            # TABLE: engine_state
+            # Persists engine state for crash recovery (last check time, alerts fired today, etc.)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS engine_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            ''')
+
+            # TABLE: metrics
+            # Records per-cycle metrics for dashboard and reporting
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cycle_at TEXT NOT NULL,
+                    alerts_fired INTEGER NOT NULL DEFAULT 0,
+                    symbols_checked INTEGER NOT NULL DEFAULT 0,
+                    elapsed_seconds REAL NOT NULL DEFAULT 0,
+                    success INTEGER NOT NULL DEFAULT 1,
+                    error_details TEXT
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_metrics_cycle_at ON metrics(cycle_at)')
 
             self.connection.commit()
             logger.info("Database tables created successfully")

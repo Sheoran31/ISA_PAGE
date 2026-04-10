@@ -4,12 +4,15 @@ Handles retries, rate limiting, and error handling.
 """
 
 from typing import List, Optional
-import time
 import requests
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+import logging
 
-from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_EXTRA_CHAT_IDS
 from utils.logger import logger
 from utils.exceptions import TelegramSendError
+import os
+from dotenv import load_dotenv
+from pathlib import Path
 
 
 class TelegramSender:
@@ -19,29 +22,68 @@ class TelegramSender:
 
     # Telegram API
     TELEGRAM_API_URL = "https://api.telegram.org/bot"
-    MAX_RETRIES = 3
-    RETRY_DELAY = 2  # seconds
 
     def __init__(self):
         """Initialize Telegram bot."""
-        if not TELEGRAM_BOT_TOKEN:
+        # Load fresh from .env file
+        env_file = Path(__file__).parent.parent / '.env'
+        load_dotenv(env_file, override=True)
+
+        token = os.getenv('TELEGRAM_BOT_TOKEN')
+        chat_id = os.getenv('TELEGRAM_CHAT_ID')
+
+        if not token:
             raise TelegramSendError("TELEGRAM_BOT_TOKEN not configured in .env")
 
-        if not TELEGRAM_CHAT_ID:
+        if not chat_id:
             raise TelegramSendError("TELEGRAM_CHAT_ID not configured in .env")
 
-        self.token = TELEGRAM_BOT_TOKEN
-        self.primary_chat_id = int(TELEGRAM_CHAT_ID)
+        self.token = token
+        self.primary_chat_id = int(chat_id)
 
         # Parse extra chat IDs
         self.extra_chat_ids = []
-        if TELEGRAM_EXTRA_CHAT_IDS:
+        extra_ids = os.getenv('TELEGRAM_EXTRA_CHAT_IDS', '')
+        if extra_ids:
             try:
-                self.extra_chat_ids = [int(cid.strip()) for cid in TELEGRAM_EXTRA_CHAT_IDS.split(',')]
+                self.extra_chat_ids = [int(cid.strip()) for cid in extra_ids.split(',')]
             except ValueError:
                 logger.warning("Invalid TELEGRAM_EXTRA_CHAT_IDS format")
 
         logger.info(f"TelegramSender initialized (primary: {self.primary_chat_id})")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=8),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=False
+    )
+    def _send_to_chat(self, message: str, chat_id: int) -> bool:
+        """
+        Internal method to send message to a chat (with retry logic).
+
+        Args:
+            message: Message text
+            chat_id: Telegram chat ID
+
+        Returns:
+            True if sent successfully
+        """
+        url = f"{self.TELEGRAM_API_URL}{self.token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+
+        response = requests.post(url, json=payload, timeout=10)
+
+        if response.status_code == 200:
+            logger.info(f"Alert sent to Telegram (chat_id: {chat_id})")
+            return True
+        else:
+            error_msg = response.text
+            raise Exception(f"Telegram API error: {error_msg}")
 
     def send_alert(self, message: str, chat_id: Optional[int] = None) -> bool:
         """
@@ -57,35 +99,7 @@ class TelegramSender:
         chat_id = chat_id or self.primary_chat_id
 
         try:
-            for attempt in range(1, self.MAX_RETRIES + 1):
-                try:
-                    url = f"{self.TELEGRAM_API_URL}{self.token}/sendMessage"
-                    payload = {
-                        "chat_id": chat_id,
-                        "text": message,
-                        "parse_mode": "HTML"
-                    }
-
-                    response = requests.post(url, json=payload, timeout=10)
-
-                    if response.status_code == 200:
-                        logger.info(f"Alert sent to Telegram (chat_id: {chat_id})")
-                        return True
-                    else:
-                        error_msg = response.text
-                        if attempt < self.MAX_RETRIES:
-                            logger.warning(f"Telegram send failed (attempt {attempt}/{self.MAX_RETRIES}): {error_msg}")
-                            time.sleep(self.RETRY_DELAY)
-                        else:
-                            raise Exception(f"Telegram API error: {error_msg}")
-
-                except requests.exceptions.Timeout:
-                    if attempt < self.MAX_RETRIES:
-                        logger.warning(f"Telegram timeout (attempt {attempt}/{self.MAX_RETRIES})")
-                        time.sleep(self.RETRY_DELAY)
-                    else:
-                        raise
-
+            return self._send_to_chat(message, chat_id)
         except Exception as e:
             logger.error(f"Failed to send Telegram alert: {e}")
             return False

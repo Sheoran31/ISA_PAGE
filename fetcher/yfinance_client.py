@@ -6,6 +6,7 @@ Handles price fetching using yfinance (no authentication needed).
 import yfinance as yf
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from utils.logger import logger
 from utils.exceptions import KiteAPIError
 
@@ -39,6 +40,12 @@ class YFinanceClient:
         """Check if client is ready."""
         return self._initialized
 
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True
+    )
     def get_ltp(self, symbol: str) -> Optional[float]:
         """
         Get Last Traded Price for a symbol.
@@ -49,20 +56,22 @@ class YFinanceClient:
         Returns:
             Current price or None
         """
-        try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period='1d')
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period='1d')
 
-            if data.empty:
-                logger.warning(f"No data for {symbol}")
-                return None
-
-            # Return the close price
-            return float(data['Close'].iloc[-1])
-        except Exception as e:
-            logger.error(f"Failed to get LTP for {symbol}: {e}")
+        if data.empty:
+            logger.warning(f"No data for {symbol}")
             return None
 
+        # Return the close price
+        return float(data['Close'].iloc[-1])
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True
+    )
     def get_ohlcv(self, symbol: str) -> Optional[Dict]:
         """
         Get OHLCV data for a symbol.
@@ -73,29 +82,25 @@ class YFinanceClient:
         Returns:
             Dict with OHLCV data or None
         """
-        try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period='1d')
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period='1d')
 
-            if data.empty:
-                logger.warning(f"No data for {symbol}")
-                return None
-
-            latest = data.iloc[-1]
-
-            return {
-                'symbol': symbol,
-                'open': float(latest['Open']),
-                'high': float(latest['High']),
-                'low': float(latest['Low']),
-                'close': float(latest['Close']),
-                'ltp': float(latest['Close']),
-                'volume': int(latest['Volume']),
-                'timestamp': datetime.utcnow().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Failed to get OHLCV for {symbol}: {e}")
+        if data.empty:
+            logger.warning(f"No data for {symbol}")
             return None
+
+        latest = data.iloc[-1]
+
+        return {
+            'symbol': symbol,
+            'open': float(latest['Open']),
+            'high': float(latest['High']),
+            'low': float(latest['Low']),
+            'close': float(latest['Close']),
+            'ltp': float(latest['Close']),
+            'volume': int(latest['Volume']),
+            'timestamp': datetime.utcnow().isoformat()
+        }
 
     def get_batch_prices(self, symbols: List[str]) -> Dict[str, Dict]:
         """
@@ -121,6 +126,12 @@ class YFinanceClient:
         logger.debug(f"Fetched prices for {len(result)}/{len(symbols)} symbols")
         return result
 
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True
+    )
     def get_historical_data(self, symbol: str, days: int = 200) -> Optional[List[Dict]]:
         """
         Get historical OHLCV data.
@@ -132,32 +143,27 @@ class YFinanceClient:
         Returns:
             List of OHLC dicts or None
         """
-        try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period=f'{days}d')
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period=f'{days}d')
 
-            if data.empty:
-                logger.warning(f"No historical data for {symbol}")
-                return None
-
-            # Convert to list of dicts
-            ohlc_list = []
-            for date, row in data.iterrows():
-                ohlc_list.append({
-                    'date': date.strftime('%Y-%m-%d'),
-                    'open': float(row['Open']),
-                    'high': float(row['High']),
-                    'low': float(row['Low']),
-                    'close': float(row['Close']),
-                    'volume': int(row['Volume'])
-                })
-
-            logger.info(f"Fetched {len(ohlc_list)} days of data for {symbol}")
-            return ohlc_list
-
-        except Exception as e:
-            logger.error(f"Failed to get historical data for {symbol}: {e}")
+        if data.empty:
+            logger.warning(f"No historical data for {symbol}")
             return None
+
+        # Convert to list of dicts
+        ohlc_list = []
+        for date, row in data.iterrows():
+            ohlc_list.append({
+                'date': date.strftime('%Y-%m-%d'),
+                'open': float(row['Open']),
+                'high': float(row['High']),
+                'low': float(row['Low']),
+                'close': float(row['Close']),
+                'volume': int(row['Volume'])
+            })
+
+        logger.info(f"Fetched {len(ohlc_list)} days of data for {symbol}")
+        return ohlc_list
 
     def validate_data_quality(self, ohlc_data: List[Dict]) -> bool:
         """

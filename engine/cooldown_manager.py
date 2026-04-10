@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Dict
 import json
 from pathlib import Path
+from threading import Lock
 
 from storage.database import db
 from utils.logger import logger
@@ -23,6 +24,7 @@ class CooldownManager:
     def __init__(self):
         """Initialize cooldown manager."""
         self._memory_cache: Dict[str, datetime] = {}
+        self._lock = Lock()  # Thread safety for concurrent access
         self._load_from_db()
         logger.info("CooldownManager initialized")
 
@@ -56,19 +58,20 @@ class CooldownManager:
         Returns:
             True if still in cooldown, False if can fire
         """
-        if alert_id not in self._memory_cache:
+        with self._lock:
+            if alert_id not in self._memory_cache:
+                return False
+
+            last_fired = self._memory_cache[alert_id]
+            cooldown_expires = last_fired + timedelta(minutes=cooldown_minutes)
+            now = datetime.utcnow()
+
+            if now < cooldown_expires:
+                remaining = (cooldown_expires - now).total_seconds() / 60
+                logger.debug(f"{alert_id}: In cooldown ({remaining:.1f} min remaining)")
+                return True
+
             return False
-
-        last_fired = self._memory_cache[alert_id]
-        cooldown_expires = last_fired + timedelta(minutes=cooldown_minutes)
-        now = datetime.utcnow()
-
-        if now < cooldown_expires:
-            remaining = (cooldown_expires - now).total_seconds() / 60
-            logger.debug(f"{alert_id}: In cooldown ({remaining:.1f} min remaining)")
-            return True
-
-        return False
 
     def set_cooldown(self, alert_id: str, cooldown_minutes: int = 30) -> None:
         """
@@ -79,7 +82,8 @@ class CooldownManager:
             cooldown_minutes: Cooldown duration
         """
         now = datetime.utcnow()
-        self._memory_cache[alert_id] = now
+        with self._lock:
+            self._memory_cache[alert_id] = now
 
         # Also save to database
         try:
@@ -100,8 +104,9 @@ class CooldownManager:
         Args:
             alert_id: Alert ID
         """
-        if alert_id in self._memory_cache:
-            del self._memory_cache[alert_id]
+        with self._lock:
+            if alert_id in self._memory_cache:
+                del self._memory_cache[alert_id]
 
         try:
             query = 'DELETE FROM cooldown_state WHERE alert_id = ?'
@@ -117,18 +122,19 @@ class CooldownManager:
         Returns:
             Remaining minutes (0 if no cooldown)
         """
-        if alert_id not in self._memory_cache:
+        with self._lock:
+            if alert_id not in self._memory_cache:
+                return 0
+
+            last_fired = self._memory_cache[alert_id]
+            cooldown_expires = last_fired + timedelta(minutes=cooldown_minutes)
+            now = datetime.utcnow()
+
+            if now < cooldown_expires:
+                remaining = int((cooldown_expires - now).total_seconds() / 60)
+                return max(remaining, 0)
+
             return 0
-
-        last_fired = self._memory_cache[alert_id]
-        cooldown_expires = last_fired + timedelta(minutes=cooldown_minutes)
-        now = datetime.utcnow()
-
-        if now < cooldown_expires:
-            remaining = int((cooldown_expires - now).total_seconds() / 60)
-            return max(remaining, 0)
-
-        return 0
 
     def clear_expired_cooldowns(self) -> int:
         """
@@ -140,28 +146,30 @@ class CooldownManager:
         now = datetime.utcnow()
         expired = []
 
-        for alert_id, last_fired in self._memory_cache.items():
-            # Assume default 30 minute cooldown
-            if now > last_fired + timedelta(minutes=30):
-                expired.append(alert_id)
+        with self._lock:
+            for alert_id, last_fired in self._memory_cache.items():
+                # Assume default 30 minute cooldown
+                if now > last_fired + timedelta(minutes=30):
+                    expired.append(alert_id)
 
-        for alert_id in expired:
-            del self._memory_cache[alert_id]
+            for alert_id in expired:
+                del self._memory_cache[alert_id]
 
         logger.debug(f"Cleared {len(expired)} expired cooldowns")
         return len(expired)
 
     def summary(self) -> str:
         """Get cooldown summary."""
-        if not self._memory_cache:
-            return "No active cooldowns"
+        with self._lock:
+            if not self._memory_cache:
+                return "No active cooldowns"
 
-        lines = [f"Active cooldowns: {len(self._memory_cache)}"]
-        for alert_id, last_fired in list(self._memory_cache.items())[:5]:
-            ago = (datetime.utcnow() - last_fired).total_seconds() / 60
-            lines.append(f"  {alert_id}: {ago:.1f} min ago")
+            lines = [f"Active cooldowns: {len(self._memory_cache)}"]
+            for alert_id, last_fired in list(self._memory_cache.items())[:5]:
+                ago = (datetime.utcnow() - last_fired).total_seconds() / 60
+                lines.append(f"  {alert_id}: {ago:.1f} min ago")
 
-        if len(self._memory_cache) > 5:
-            lines.append(f"  ... and {len(self._memory_cache) - 5} more")
+            if len(self._memory_cache) > 5:
+                lines.append(f"  ... and {len(self._memory_cache) - 5} more")
 
-        return "\n".join(lines)
+            return "\n".join(lines)

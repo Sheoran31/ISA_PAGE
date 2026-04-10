@@ -54,6 +54,12 @@ MARKET_HOURS_ONLY = get_optional('MARKET_HOURS_ONLY', 'true').lower() == 'true'
 # ========== ALERT BEHAVIOR ==========
 DEFAULT_COOLDOWN_MINUTES = int(get_optional('DEFAULT_COOLDOWN_MINUTES', '30'))
 MAX_ALERTS_PER_CYCLE = int(get_optional('MAX_ALERTS_PER_CYCLE', '10'))
+MAX_ALERTS_PER_SYMBOL_PER_DAY = int(get_optional('MAX_ALERTS_PER_SYMBOL_PER_DAY', '5'))
+
+# ========== REAL-TIME TRIGGER SETTINGS ==========
+REALTIME_INTERVAL_SECONDS = int(get_optional('REALTIME_INTERVAL_SECONDS', '30'))
+REALTIME_CONDITION_TYPES = get_optional('REALTIME_CONDITION_TYPES',
+                                         'price_above,price_below,percent_change,volume_spike').split(',')
 
 # ========== STORAGE ==========
 DATABASE_PATH = get_optional('DATABASE_PATH', 'data/alerts.db')

@@ -42,6 +42,10 @@ class MessageFormatter:
                 return MessageFormatter._format_price_below(alert_name, symbol, price_data)
             elif condition_type == 'ema_consolidation':
                 return MessageFormatter._format_ema_breakout(alert_name, symbol, price_data)
+            elif condition_type == 'ema_breakdown':
+                return MessageFormatter._format_ema_breakdown(alert_name, symbol, price_data)
+            elif condition_type == 'ema_smart_breakout':
+                return MessageFormatter._format_ema_smart(alert_name, symbol, price_data)
             elif condition_type == 'percent_change':
                 return MessageFormatter._format_percent_change(alert_name, symbol, price_data)
             elif condition_type == 'volume_spike':
@@ -158,6 +162,107 @@ class MessageFormatter:
             f"Price: ₹{current:.2f}\n"
             f"Time: {datetime.now().strftime('%H:%M IST')}"
         )
+
+    @staticmethod
+    def _format_ema_breakdown(name: str, symbol: str, data: Dict) -> str:
+        """Format EMA breakdown alert."""
+        try:
+            current_close = data.get('ltp') or data.get('close', 0)
+            ema_info = data.get('ema_breakdown', {})
+
+            if not ema_info:
+                return f"📊 {name}\n{symbol}\nClose: ₹{current_close:.2f}"
+
+            lowest_ema = ema_info.get('lowest_ema', 0)
+            today_emas = ema_info.get('today_emas', {})
+            consolidation_days = ema_info.get('consolidation_days', 0)
+            range_high, range_low = ema_info.get('consolidation_range', (None, None))
+
+            # Build message
+            msg = f"🔴 BREAKDOWN! {name}\n\n"
+            msg += f"Stock: {symbol}\n"
+            msg += f"Close: ₹{current_close:.2f}\n"
+            msg += f"Time: {datetime.now().strftime('%H:%M IST')}\n"
+
+            # Breakdown info
+            msg += f"\n⚠️ SELL Signal:\n"
+            msg += f"Price CLOSED BELOW all EMAs\n"
+            msg += f"Lowest EMA: ₹{lowest_ema:.2f}\n"
+
+            # Consolidation info
+            if consolidation_days > 0:
+                msg += f"\n📈 Prior Consolidation:\n"
+                msg += f"Duration: {consolidation_days} days\n"
+                if range_high and range_low:
+                    msg += f"Range: ₹{range_low:.2f} - ₹{range_high:.2f}\n"
+
+            # EMA values
+            if today_emas:
+                msg += f"\n📊 EMA Values:\n"
+                for period in sorted(today_emas.keys()):
+                    ema_val = today_emas[period]
+                    if ema_val:
+                        diff = current_close - ema_val
+                        diff_pct = (diff / ema_val) * 100
+                        msg += f"EMA{period}: ₹{ema_val:.2f} ({diff_pct:+.2f}%)\n"
+
+            return msg
+        except Exception as e:
+            logger.error(f"Error formatting breakdown message: {e}")
+            return f"🔴 {name}\n{symbol}"
+
+    @staticmethod
+    def _format_ema_smart(name: str, symbol: str, data: Dict) -> str:
+        """Format Smart EMA breakout/breakdown alert."""
+        try:
+            current_close = data.get('ltp') or data.get('close', 0)
+            signal_info = data.get('ema_signal', {})
+
+            if not signal_info:
+                return f"📊 {name}\n{symbol}\nClose: ₹{current_close:.2f}"
+
+            signal_type = signal_info.get('signal_type', 'SIGNAL')
+            is_breakout = signal_info.get('is_breakout', False)
+            is_breakdown = signal_info.get('is_breakdown', False)
+            ema_spread_percent = signal_info.get('ema_spread_percent', 0)
+            ema_high = signal_info.get('ema_high', 0)
+            ema_low = signal_info.get('ema_low', 0)
+            today_emas = signal_info.get('today_emas', {})
+
+            # Choose emoji and action based on signal type
+            if is_breakout:
+                emoji = "🟢"
+                action = "BUY ⬆️"
+            else:
+                emoji = "🔴"
+                action = "SELL ⬇️"
+
+            # Build message
+            msg = f"{emoji} {signal_type}\n\n"
+            msg += f"Stock: {symbol}\n"
+            msg += f"Action: {action}\n"
+            msg += f"Close: ₹{current_close:.2f}\n"
+            msg += f"Time: {datetime.now().strftime('%H:%M IST')}\n"
+
+            # EMA consolidation info
+            msg += f"\n📊 EMA Status:\n"
+            msg += f"Spread: {ema_spread_percent:.2f}% (TIGHT)\n"
+            msg += f"Range: ₹{ema_low:.2f} - ₹{ema_high:.2f}\n"
+
+            # EMA values
+            if today_emas:
+                msg += f"\n📈 EMA Values:\n"
+                for period in sorted(today_emas.keys()):
+                    ema_val = today_emas[period]
+                    if ema_val:
+                        diff = current_close - ema_val
+                        diff_pct = (diff / ema_val) * 100
+                        msg += f"EMA{period}: ₹{ema_val:.2f} ({diff_pct:+.2f}%)\n"
+
+            return msg
+        except Exception as e:
+            logger.error(f"Error formatting smart signal message: {e}")
+            return f"📊 {name}\n{symbol}"
 
     @staticmethod
     def _format_generic(name: str, symbol: str, data: Dict) -> str:
