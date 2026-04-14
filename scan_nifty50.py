@@ -7,7 +7,58 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
+import requests
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+from config.accounts import AccountManager
+
+# Load environment variables
+env_file = Path(__file__).parent / '.env'
+load_dotenv(env_file, override=True)
+
+def send_stock_alert_to_telegram(symbol: str, signal_type: str, price: float, ema_high: float, ema_low: float, spread_pct: float, account_info: Optional[str] = None):
+    """Send individual stock alert to Telegram"""
+    token = os.getenv('TELEGRAM_BOT_TOKEN')
+    chat_id = os.getenv('TELEGRAM_CHAT_ID')
+
+    if not token or not chat_id:
+        return False
+
+    # Create signal-specific message
+    if signal_type == 'BREAKOUT':
+        emoji = '🟢'
+        signal_text = 'BREAKOUT (BUY)'
+    else:  # BREAKDOWN
+        emoji = '🔴'
+        signal_text = 'BREAKDOWN (SELL)'
+
+    account_line = f"\n*Account:* {account_info}" if account_info else ""
+
+    message = f"""{emoji} *SIGNAL DETECTED*
+
+*Stock:* {symbol}
+*Signal:* {signal_text}
+*Price:* ₹{price:.2f}
+*EMA Range:* ₹{ema_low:.2f} - ₹{ema_high:.2f}
+*Spread:* {spread_pct:.2f}%{account_line}
+
+⏰ {datetime.now().strftime('%Y-%m-%d %H:%M IST')}"""
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+
+    try:
+        response = requests.post(url, json=payload)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Error sending alert: {e}")
+        return False
 
 class NiftyScannerEMA:
     """Scan Nifty 50 for EMA breakout/breakdown signals"""
@@ -123,7 +174,19 @@ def main():
     print("\n" + "="*100)
     print("🚀 NIFTY 50 EMA BREAKOUT/BREAKDOWN SCANNER")
     print("="*100)
-    print(f"\n📊 Scanning {len(NiftyScannerEMA.NIFTY_50)} stocks...\n")
+
+    # Load configured accounts
+    manager = AccountManager()
+    users = manager.list_users()
+
+    if not users:
+        print("\n⚠️  No accounts configured!")
+        print("   Run: python setup_accounts.py")
+        print("   To add your Dhan/Zerodha accounts\n")
+        return
+
+    print(f"\n👥 Configured accounts: {', '.join([manager.get_user(u).name for u in users])}")
+    print(f"📊 Scanning {len(NiftyScannerEMA.NIFTY_50)} stocks...\n")
 
     breakout_stocks = []
     breakdown_stocks = []
@@ -140,9 +203,27 @@ def main():
             if result['signal'] == 'BREAKOUT':
                 breakout_stocks.append(result)
                 print(f"✅ BREAKOUT DETECTED!")
+                # Send Telegram alert for each configured account
+                for user_id in users:
+                    user = manager.get_user(user_id)
+                    account_info = f"{user.name} ({user_id})"
+                    send_stock_alert_to_telegram(
+                        symbol, 'BREAKOUT', result['close'],
+                        result['ema_high'], result['ema_low'], result['spread_pct'],
+                        account_info=account_info
+                    )
             elif result['signal'] == 'BREAKDOWN':
                 breakdown_stocks.append(result)
                 print(f"⚠️ BREAKDOWN DETECTED!")
+                # Send Telegram alert for each configured account
+                for user_id in users:
+                    user = manager.get_user(user_id)
+                    account_info = f"{user.name} ({user_id})"
+                    send_stock_alert_to_telegram(
+                        symbol, 'BREAKDOWN', result['close'],
+                        result['ema_high'], result['ema_low'], result['spread_pct'],
+                        account_info=account_info
+                    )
             else:
                 print(f"➖ No signal")
         else:

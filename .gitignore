@@ -1,6 +1,7 @@
-# Environment
+# Environment & Credentials
 .env
 .env.local
+accounts.json
 
 # Virtual environment
 venv/
