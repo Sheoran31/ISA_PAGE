@@ -1,6 +1,7 @@
 # ===== Core API Clients =====
 yfinance>=0.2.32
 python-telegram-bot>=21.0.0
+kiteconnect>=4.3.0
 
 # ===== Scheduling =====
 APScheduler>=3.10.4

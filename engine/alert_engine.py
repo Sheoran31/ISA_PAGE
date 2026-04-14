@@ -14,7 +14,7 @@ from engine.cooldown_manager import CooldownManager
 from engine.rate_limiter import RateLimiter
 from fetcher.price_fetcher import get_price_fetcher
 from alerts.message_formatter import MessageFormatter
-from alerts.telegram_sender import get_telegram_sender
+from alerts.dispatcher import get_alert_dispatcher
 from storage.alert_repository import AlertRepository
 from storage.condition_repository import ConditionRepository
 from storage.engine_state_repository import EngineStateRepository
@@ -42,7 +42,7 @@ class AlertEngine:
     def __init__(self):
         """Initialize alert engine."""
         self.price_fetcher = get_price_fetcher()
-        self.telegram_sender = get_telegram_sender()
+        self.alert_dispatcher = get_alert_dispatcher()
         self.cooldown_manager = CooldownManager()
         self.rate_limiter = RateLimiter(
             max_per_cycle=MAX_ALERTS_PER_CYCLE,
@@ -153,8 +153,8 @@ class AlertEngine:
                             price_data=price_data
                         )
 
-                        # Send alert
-                        sent = self.telegram_sender.send_alert(message)
+                        # Send alert (to Telegram and optionally Zerodha)
+                        sent = self.alert_dispatcher.send_alert(message)
 
                         # Record in database
                         if sent:
