@@ -4,7 +4,7 @@ Supports both traditional alerts and order-based alerts.
 """
 
 from typing import Dict, Any, Optional
-from config.settings import ZERODHA_ENABLED
+from config.settings import ZERODHA_ENABLED, DHAN_ENABLED
 from alerts.telegram_sender import get_telegram_sender
 from utils.logger import logger
 
@@ -15,6 +15,13 @@ try:
 except ImportError:
     ZERODHA_AVAILABLE = False
 
+# Import Dhan sender only if available
+try:
+    from alerts.dhan_sender import get_dhan_sender
+    DHAN_AVAILABLE = True
+except ImportError:
+    DHAN_AVAILABLE = False
+
 
 class AlertDispatcher:
     """Dispatch alerts to multiple channels (Telegram, Zerodha, etc.)"""
@@ -23,17 +30,29 @@ class AlertDispatcher:
         """Initialize alert dispatcher"""
         self.telegram_sender = get_telegram_sender()
         self.zerodha_sender = None
+        self.dhan_sender = None
         self.zerodha_enabled = ZERODHA_ENABLED and ZERODHA_AVAILABLE
+        self.dhan_enabled = DHAN_ENABLED and DHAN_AVAILABLE
 
         if self.zerodha_enabled:
             try:
                 self.zerodha_sender = get_zerodha_sender()
                 logger.info("✅ Zerodha alerts enabled")
             except Exception as e:
-                logger.warning(f"⚠️ Zerodha initialization failed: {e} - Telegram-only mode")
+                logger.warning(f"⚠️ Zerodha initialization failed: {e}")
                 self.zerodha_enabled = False
         else:
             logger.info("ℹ️ Zerodha alerts disabled (ZERODHA_ENABLED=false)")
+
+        if self.dhan_enabled:
+            try:
+                self.dhan_sender = get_dhan_sender()
+                logger.info("✅ Dhan alerts enabled")
+            except Exception as e:
+                logger.warning(f"⚠️ Dhan initialization failed: {e}")
+                self.dhan_enabled = False
+        else:
+            logger.info("ℹ️ Dhan alerts disabled (DHAN_ENABLED=false)")
 
     def send_alert(self, message: str) -> bool:
         """
@@ -159,6 +178,96 @@ class AlertDispatcher:
         if not self.zerodha_enabled or not self.zerodha_sender:
             return {'status': 'failed', 'error': 'Zerodha not enabled'}
         return self.zerodha_sender.reject_order(order_id)
+
+    def send_dhan_breakout_alert(self, symbol: str, price: float, ema_high: float,
+                                 ema_low: float, spread_pct: float) -> Dict[str, Any]:
+        """
+        Send breakout alert to Dhan (if enabled)
+
+        Args:
+            symbol: Stock symbol
+            price: Current price
+            ema_high: Highest EMA
+            ema_low: Lowest EMA
+            spread_pct: EMA spread percentage
+
+        Returns:
+            Alert result with order_id for confirmation
+        """
+        if not self.dhan_enabled or not self.dhan_sender:
+            return {
+                'status': 'skipped',
+                'reason': 'Dhan alerts not enabled'
+            }
+
+        try:
+            return self.dhan_sender.send_breakout_alert(
+                symbol=symbol,
+                price=price,
+                ema_high=ema_high,
+                ema_low=ema_low,
+                spread_pct=spread_pct
+            )
+        except Exception as e:
+            logger.error(f"Failed to send Dhan breakout alert: {e}")
+            return {
+                'status': 'failed',
+                'error': str(e)
+            }
+
+    def send_dhan_breakdown_alert(self, symbol: str, price: float, ema_high: float,
+                                  ema_low: float, spread_pct: float) -> Dict[str, Any]:
+        """
+        Send breakdown alert to Dhan (if enabled)
+
+        Args:
+            symbol: Stock symbol
+            price: Current price
+            ema_high: Highest EMA
+            ema_low: Lowest EMA
+            spread_pct: EMA spread percentage
+
+        Returns:
+            Alert result with order_id for confirmation
+        """
+        if not self.dhan_enabled or not self.dhan_sender:
+            return {
+                'status': 'skipped',
+                'reason': 'Dhan alerts not enabled'
+            }
+
+        try:
+            return self.dhan_sender.send_breakdown_alert(
+                symbol=symbol,
+                price=price,
+                ema_high=ema_high,
+                ema_low=ema_low,
+                spread_pct=spread_pct
+            )
+        except Exception as e:
+            logger.error(f"Failed to send Dhan breakdown alert: {e}")
+            return {
+                'status': 'failed',
+                'error': str(e)
+            }
+
+    def get_dhan_pending_orders(self) -> Dict:
+        """Get all pending Dhan orders"""
+        if not self.dhan_enabled or not self.dhan_sender:
+            return {}
+        return self.dhan_sender.get_pending_orders()
+
+    def confirm_dhan_order(self, order_id: str, quantity: int = 1) -> Dict[str, Any]:
+        """Confirm and execute a pending Dhan order"""
+        if not self.dhan_enabled or not self.dhan_sender:
+            return {'status': 'failed', 'error': 'Dhan not enabled'}
+        return self.dhan_sender.confirm_and_execute(order_id, quantity)
+
+    def reject_dhan_order(self, order_id: str) -> Dict[str, Any]:
+        """Reject a pending Dhan order"""
+        if not self.dhan_enabled or not self.dhan_sender:
+            return {'status': 'failed', 'error': 'Dhan not enabled'}
+        return self.dhan_sender.reject_order(order_id)
 
 
 # Global instance

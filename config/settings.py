@@ -53,6 +53,12 @@ ZERODHA_API_KEY = get_optional('ZERODHA_API_KEY')
 ZERODHA_ACCESS_TOKEN = get_optional('ZERODHA_ACCESS_TOKEN')
 ZERODHA_USER_ID = get_optional('ZERODHA_USER_ID')
 
+# ========== DHAN API (OPTIONAL) ==========
+DHAN_ENABLED = get_optional('DHAN_ENABLED', 'false').lower() == 'true'
+DHAN_API_KEY = get_optional('DHAN_API_KEY')
+DHAN_ACCESS_TOKEN = get_optional('DHAN_ACCESS_TOKEN')
+DHAN_USER_ID = get_optional('DHAN_USER_ID')
+
 # ========== SCHEDULER SETTINGS ==========
 CHECK_INTERVAL_MINUTES = int(get_optional('CHECK_INTERVAL_MINUTES', '2'))
 MARKET_HOURS_ONLY = get_optional('MARKET_HOURS_ONLY', 'true').lower() == 'true'
